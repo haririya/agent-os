@@ -77,9 +77,7 @@ def _gate(monkeypatch: pytest.MonkeyPatch, result: object) -> None:
     monkeypatch.setattr(code_exec, "gate_action", _fake_gate)
 
 
-def test_denied_calls_leave_no_tempdir(
-    temp_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_denied_calls_leave_no_tempdir(temp_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _gate(monkeypatch, _denial())
 
     for index in range(5):
@@ -152,9 +150,7 @@ def test_escalated_subprocess_timeout_leaves_no_tempdir(
     monkeypatch.setattr(code_exec, "run_under_backend", _noted)
     monkeypatch.setattr(code_exec, "escalate_backend_denial", _escalate)
 
-    out = asyncio.run(
-        code_exec.execute_code("import time\ntime.sleep(30)", timeout=1)
-    )
+    out = asyncio.run(code_exec.execute_code("import time\ntime.sleep(30)", timeout=1))
     assert '"timed_out": true' in out
     assert _leaked(temp_root) == []
 
@@ -199,3 +195,19 @@ def test_configured_workspace_is_never_removed(
         current_tool_context.reset(token)
 
     assert keeper.read_text(encoding="utf-8") == "keep"
+
+
+def test_tempdir_cleanup_on_setup_exception(
+    temp_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ephemeral workdir must be cleaned up even if an exception occurs during setup."""
+
+    def _boom_env() -> dict[str, str]:
+        raise RuntimeError("setup env failure")
+
+    monkeypatch.setattr(code_exec, "_build_safe_env", _boom_env)
+
+    with pytest.raises(RuntimeError, match="setup env failure"):
+        asyncio.run(code_exec.execute_code("print(1)"))
+
+    assert _leaked(temp_root) == []
