@@ -68,3 +68,14 @@ def test_shape_text_and_table_text_extraction(tmp_path: Path) -> None:
     assert "Secondary point" in slide_data["text"]
     assert "Metric | Value" in slide_data["text"]
     assert "Q1 Revenue (USD) | $100M" in slide_data["text"]
+
+
+def test_notes_text_does_not_instantiate_blank_notes_slide() -> None:
+    """_notes_text must not instantiate a NotesSlide when has_notes_slide is False."""
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    assert slide.has_notes_slide is False
+
+    notes = extract_text._notes_text(slide)
+    assert notes == ""
+    assert slide.has_notes_slide is False

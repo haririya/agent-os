@@ -93,6 +93,8 @@ def _slide_text(slide) -> list[str]:
 
 
 def _notes_text(slide) -> str:
+    if not getattr(slide, "has_notes_slide", False):
+        return ""
     notes = getattr(slide, "notes_slide", None)
     if not notes:
         return ""
