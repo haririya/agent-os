@@ -81,7 +81,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if len(raw) > args.max_bytes:
-        raw = raw[: args.max_bytes - 1] + b"\xe2\x80\xa6"  # … (truncation marker)
+        marker = b"\xe2\x80\xa6"
+        if args.max_bytes < len(marker):
+            raw = raw[: args.max_bytes]
+        else:
+            raw = raw[: args.max_bytes - len(marker)] + marker
 
     # Lossy decode — meta-skill DAGs need string output for templating.
     text = raw.decode("utf-8", errors="replace")
