@@ -211,3 +211,111 @@ def test_inspect_xlsx_creates_parent_directory(
     monkeypatch.setattr(sys, "argv", ["inspect_xlsx.py", str(src), "--out", str(out)])
     assert inspect_xlsx.main() == 0
     assert out.is_file()
+
+
+# ── Issue #1260: set_cell with explicit null clears cell value ──────────────────
+
+
+def test_set_cell_explicit_null_clears_cell(tmp_path: Path) -> None:
+    """Explicit null value in set_cell operation clears cell contents upon save/reload."""
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import create_xlsx  # type: ignore[import-not-found]
+        import edit_xlsx  # type: ignore[import-not-found]
+        import inspect_xlsx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    src = tmp_path / "book.xlsx"
+    create_xlsx.build({"sheets": [{"name": "Sales", "rows": [["NA", 100]]}]}).save(str(src))
+
+    from openpyxl import load_workbook
+
+    wb = load_workbook(str(src))
+    applied = edit_xlsx.apply_ops(
+        wb,
+        [
+            {"op": "set_cell", "sheet": "Sales", "row": 1, "col": 2, "value": None},
+        ],
+    )
+    assert applied == 1
+
+    out = tmp_path / "out.xlsx"
+    wb.save(str(out))
+    wb.close()
+
+    # Re-open from disk and inspect to verify cell is cleared
+    reloaded = load_workbook(str(out))
+    assert reloaded["Sales"].cell(row=1, column=2).value is None
+    reloaded.close()
+
+    inspected = inspect_xlsx.inspect(out, data_only=False)
+    sheet = inspected["sheets"][0]
+    row = sheet["rows"][0]
+    # Row list length should be 1 since cell (1, 2) is cleared (empty)
+    assert len(row) == 1 or row[1]["value"] is None
+
+
+def test_set_cell_missing_value_key_skipped(tmp_path: Path) -> None:
+    """Operation with missing 'value' key is skipped and leaves existing cell unchanged."""
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import create_xlsx  # type: ignore[import-not-found]
+        import edit_xlsx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    src = tmp_path / "book.xlsx"
+    create_xlsx.build({"sheets": [{"name": "Sales", "rows": [["NA", 100]]}]}).save(str(src))
+
+    from openpyxl import load_workbook
+
+    wb = load_workbook(str(src))
+    applied = edit_xlsx.apply_ops(
+        wb,
+        [
+            {"op": "set_cell", "sheet": "Sales", "row": 1, "col": 2},  # missing 'value' key
+        ],
+    )
+    assert applied == 0
+
+    out = tmp_path / "out.xlsx"
+    wb.save(str(out))
+    wb.close()
+
+    reloaded = load_workbook(str(out))
+    assert reloaded["Sales"].cell(row=1, column=2).value == 100
+    reloaded.close()
+
+
+def test_set_cell_explicit_null_via_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Round-trip via edit_xlsx.py CLI script with JSON null value clears cell."""
+    import json
+
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import create_xlsx  # type: ignore[import-not-found]
+        import edit_xlsx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    src = tmp_path / "book.xlsx"
+    create_xlsx.build({"sheets": [{"name": "Sales", "rows": [["NA", 100]]}]}).save(str(src))
+
+    ops_file = tmp_path / "ops.json"
+    ops_file.write_text(
+        json.dumps([{"op": "set_cell", "sheet": "Sales", "row": 1, "col": 2, "value": None}]),
+        encoding="utf-8",
+    )
+    out_file = tmp_path / "out.xlsx"
+
+    monkeypatch.setattr(
+        sys, "argv", ["edit_xlsx.py", str(src), str(ops_file), "--out", str(out_file)]
+    )
+    assert edit_xlsx.main() == 0
+
+    from openpyxl import load_workbook
+
+    reloaded = load_workbook(str(out_file))
+    assert reloaded["Sales"].cell(row=1, column=2).value is None
+    reloaded.close()

@@ -4,6 +4,7 @@ Operations:
     {"op": "set_cell", "sheet": "Q3", "row": 1, "col": 1, "value": "..."}
     {"op": "set_cell", "sheet": "Q3", "row": 2, "col": 2, "value": "=SUM(B3:B10)"}
     {"op": "set_cell", "sheet": "Q3", "row": 3, "col": 3, "value": "=hello", "as_text": true}
+    {"op": "set_cell", "sheet": "Q3", "row": 4, "col": 4, "value": null}  # Clears cell
     {"op": "rename_sheet", "old": "Sheet1", "new": "Summary"}
     {"op": "merge_cells", "sheet": "Q3", "range": "A1:C1"}
 """
@@ -41,11 +42,15 @@ def apply_ops(wb: Any, ops: list[dict[str, Any]]) -> int:
             sheet_name = op.get("sheet")
             row = op.get("row")
             col = op.get("col")
-            value = op.get("value")
-            if sheet_name not in wb.sheetnames or row is None or col is None:
+            if "value" not in op or sheet_name not in wb.sheetnames or row is None or col is None:
                 continue
             ws = wb[sheet_name]
-            ws.cell(row=int(row), column=int(col), value=_coerce(value, bool(op.get("as_text"))))
+            cell = ws.cell(row=int(row), column=int(col))
+            val = op.get("value")
+            if val is None:
+                cell.value = None
+            else:
+                cell.value = _coerce(val, bool(op.get("as_text")))
             applied += 1
         elif kind == "rename_sheet":
             old = op.get("old")
