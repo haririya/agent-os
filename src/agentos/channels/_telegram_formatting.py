@@ -40,14 +40,36 @@ def _replace_code_spans(text: str) -> tuple[str, list[str]]:
     return "".join(output), chunks
 
 
-def _render_inline(text: str) -> str:
-    protected, code_chunks = _replace_code_spans(text)
-    rendered = html.escape(protected)
-    rendered = _LINK_RE.sub(r'<a href="\2">\1</a>', rendered)
-    rendered = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", r"<b>\1</b>", rendered)
+def _apply_inline_formatting(text: str) -> str:
+    rendered = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", r"<b>\1</b>", text)
     rendered = re.sub(r"__(?=\S)(.+?)(?<=\S)__", r"<b>\1</b>", rendered)
     rendered = re.sub(r"~~(?=\S)(.+?)(?<=\S)~~", r"<s>\1</s>", rendered)
     rendered = re.sub(r"(?<!\*)\*(?=\S)(.+?)(?<=\S)\*(?!\*)", r"<i>\1</i>", rendered)
+    return rendered
+
+
+def _replace_links(text: str) -> tuple[str, list[str]]:
+    """Replace Markdown links with private placeholders to protect href attributes."""
+    chunks: list[str] = []
+
+    def _sub(match: re.Match[str]) -> str:
+        label = _apply_inline_formatting(match.group(1))
+        url = match.group(2)
+        placeholder = f"\x00TG_LINK_{len(chunks)}\x00"
+        chunks.append(f'<a href="{url}">{label}</a>')
+        return placeholder
+
+    output = _LINK_RE.sub(_sub, text)
+    return output, chunks
+
+
+def _render_inline(text: str) -> str:
+    protected, code_chunks = _replace_code_spans(text)
+    rendered = html.escape(protected)
+    rendered, link_chunks = _replace_links(rendered)
+    rendered = _apply_inline_formatting(rendered)
+    for index, chunk in enumerate(link_chunks):
+        rendered = rendered.replace(f"\x00TG_LINK_{index}\x00", chunk)
     for index, chunk in enumerate(code_chunks):
         rendered = rendered.replace(f"\x00TG_CODE_{index}\x00", chunk)
     return rendered
@@ -131,9 +153,7 @@ def _render_table(headers: list[str], rows: list[list[str]]) -> list[str]:
     clean_headers = [_plain_inline(header) for header in headers]
     column_count = len(headers)
     if column_count == 2:
-        rendered = [
-            f"<b>{html.escape(clean_headers[0])} — {html.escape(clean_headers[1])}</b>"
-        ]
+        rendered = [f"<b>{html.escape(clean_headers[0])} — {html.escape(clean_headers[1])}</b>"]
         for row in rows:
             normalised = _normalize_row(row, column_count)
             label = normalised[0]

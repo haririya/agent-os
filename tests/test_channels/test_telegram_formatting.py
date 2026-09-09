@@ -48,8 +48,7 @@ if x < 2:
     assert "<b>Result &lt;safe&gt;</b>" in rendered
     assert "Use <b>care &amp; caution</b> with <code>x &lt; 2</code>." in rendered
     assert (
-        '<pre><code class="language-python">'
-        "if x &lt; 2:\n    print(&quot;&amp;&quot;)</code></pre>"
+        '<pre><code class="language-python">if x &lt; 2:\n    print(&quot;&amp;&quot;)</code></pre>'
     ) in rendered
 
 
@@ -127,12 +126,7 @@ async def test_telegram_send_falls_back_to_plain_text_on_entity_parse_error() ->
 
 def test_two_column_table_with_short_row_pads_missing_cell() -> None:
     """A 2-column table row with only 1 cell should be padded, not dropped."""
-    markdown = (
-        "| Header A | Header B |\n"
-        "| --- | --- |\n"
-        "| Row 1 Only |\n"
-        "| x | y |\n"
-    )
+    markdown = "| Header A | Header B |\n| --- | --- |\n| Row 1 Only |\n| x | y |\n"
     rendered = render_telegram_html(markdown)
 
     # Both rows must appear — the old `break` dropped "| x | y |".
@@ -146,12 +140,7 @@ def test_two_column_table_with_short_row_pads_missing_cell() -> None:
 
 def test_three_column_table_with_short_row_pads_missing_cells() -> None:
     """A 3-column table row missing trailing cells should be padded."""
-    markdown = (
-        "| A | B | C |\n"
-        "| --- | --- | --- |\n"
-        "| only-a |\n"
-        "| x | y | z |\n"
-    )
+    markdown = "| A | B | C |\n| --- | --- | --- |\n| only-a |\n| x | y | z |\n"
     rendered = render_telegram_html(markdown)
 
     assert "<b>A · B · C</b>" in rendered
@@ -166,12 +155,7 @@ def test_three_column_table_with_short_row_pads_missing_cells() -> None:
 
 def test_table_row_with_extra_columns_is_truncated() -> None:
     """A row with more cells than headers should be truncated, not break."""
-    markdown = (
-        "| A | B |\n"
-        "| --- | --- |\n"
-        "| 1 | 2 | 3 | 4 |\n"
-        "| x | y |\n"
-    )
+    markdown = "| A | B |\n| --- | --- |\n| 1 | 2 | 3 | 4 |\n| x | y |\n"
     rendered = render_telegram_html(markdown)
 
     assert "<b>A — B</b>" in rendered
@@ -207,3 +191,39 @@ def test_mixed_ragged_rows_all_render_without_raw_pipes() -> None:
     assert "extra" not in rendered
     # No raw pipe characters.
     assert "|" not in rendered
+
+
+# ── Issue #1435: URL href mutation ──────────────────────────────────────
+
+
+def test_telegram_markdown_preserves_href_urls_with_formatting_markers() -> None:
+    """URLs containing __, *, or ~~ must not be mutated by inline formatting."""
+    double_underscore = "[test](https://example.com/foo__bar__baz)"
+    asterisk = "[test](https://example.com/foo*bar*baz)"
+    strikethrough = "[test](https://example.com/foo~~bar~~baz)"
+
+    assert (
+        render_telegram_html(double_underscore)
+        == '<a href="https://example.com/foo__bar__baz">test</a>'
+    )
+    assert render_telegram_html(asterisk) == '<a href="https://example.com/foo*bar*baz">test</a>'
+    assert (
+        render_telegram_html(strikethrough)
+        == '<a href="https://example.com/foo~~bar~~baz">test</a>'
+    )
+
+
+def test_telegram_markdown_formats_link_labels_with_protected_href() -> None:
+    """Link labels containing bold/italic formatting should render, while href remains unmutated."""
+    bold_label = "[**bold label**](https://x.com/a__b)"
+    italic_label = "[*italic label*](https://x.com/a*b)"
+    code_label = "[`code label`](https://x.com/a~~b)"
+
+    assert render_telegram_html(bold_label) == '<a href="https://x.com/a__b"><b>bold label</b></a>'
+    assert (
+        render_telegram_html(italic_label) == '<a href="https://x.com/a*b"><i>italic label</i></a>'
+    )
+    assert (
+        render_telegram_html(code_label)
+        == '<a href="https://x.com/a~~b"><code>code label</code></a>'
+    )
