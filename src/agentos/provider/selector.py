@@ -282,6 +282,11 @@ class ModelSelector:
         if fallbacks is not None:
             self._config.fallbacks = list(fallbacks)
             self._chain = [self._chain[0], *fallbacks]
+            if self._admitted_index is not None and self._admitted_index != 0:
+                self._admitted_index = None
+        self._index = 0
+        if self._admitted_index is not None and self._admitted_index >= len(self._chain):
+            self._admitted_index = None
 
     def sync_primary(self, cfg: ProviderConfig) -> None:
         """Replace the primary provider config for future resolves and clones."""

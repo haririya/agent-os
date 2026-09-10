@@ -214,9 +214,7 @@ def test_disabled_breaker_always_admits() -> None:
 
 
 def test_settings_clamp_nonsense_values() -> None:
-    settings = BreakerSettings(
-        failure_threshold=0, cooldown_seconds=-5.0, max_cooldown_seconds=0.0
-    )
+    settings = BreakerSettings(failure_threshold=0, cooldown_seconds=-5.0, max_cooldown_seconds=0.0)
     assert settings.failure_threshold == 1
     assert settings.cooldown_seconds == 1.0
     assert settings.max_cooldown_seconds == 1.0
@@ -351,9 +349,7 @@ def test_breaker_state_survives_clone() -> None:
 
 
 def test_selector_defaults_to_its_own_breaker() -> None:
-    selector = ModelSelector(
-        SelectorConfig(primary=ProviderConfig("openrouter", "m", api_key="k"))
-    )
+    selector = ModelSelector(SelectorConfig(primary=ProviderConfig("openrouter", "m", api_key="k")))
     assert selector.circuit_breaker is not None
     assert selector.clone().circuit_breaker is selector.circuit_breaker
 
@@ -395,6 +391,57 @@ def test_repeated_resolve_keeps_the_probe_this_selector_was_granted() -> None:
     assert selector.active_provider_id == "openrouter"  # probe granted
 
     selector.override_model("openai/other")
+    selector.resolve()
+    assert selector.active_provider_id == "openrouter"
+
+
+def test_override_model_resets_index_and_prevents_index_error_with_shorter_chain() -> None:
+    """When a selector has advanced to a fallback and override_model updates the
+    chain with fewer fallbacks, the selector must not crash with IndexError and
+    must evaluate from the primary."""
+    clock = FakeClock()
+    breaker = _breaker(clock, threshold=1)
+    _fail(breaker, "openrouter", 1)  # openrouter is in OPEN state
+
+    selector = _three_link_selector(breaker)
+    selector.resolve()
+    # First resolve skipped openrouter (index 0) and picked deepseek (index 1)
+    assert selector.active_provider_id == "deepseek"
+    assert selector._index == 1
+
+    # Override model with an empty fallback list (shortened chain of length 1)
+    selector.override_model("openai/gpt-5-mini", fallbacks=[])
+    assert len(selector._chain) == 1
+    assert selector._index == 0
+
+    # Must not raise IndexError: list index out of range
+    selector.resolve()
+    assert selector.active_provider_id == "openrouter"
+
+
+def test_override_model_resets_stale_fallback_index_to_primary() -> None:
+    """When the primary recovers or a new model is configured, override_model
+    must reset index to 0 so the primary provider is evaluated."""
+    clock = FakeClock()
+    breaker = _breaker(clock, threshold=1, cooldown=60.0)
+    _fail(breaker, "openrouter", 1)
+
+    selector = _three_link_selector(breaker)
+    selector.resolve()
+    assert selector.active_provider_id == "deepseek"
+    assert selector._index == 1
+
+    # Cooldown expires: openrouter is now in HALF_OPEN state
+    clock.advance(60.0)
+
+    # Override model on primary with a new fallback list
+    selector.override_model(
+        "openai/gpt-5.4-mini",
+        fallbacks=[ProviderConfig("anthropic", "claude-sonnet-4-6", api_key="k")],
+    )
+    assert selector._index == 0
+
+    # Resolving now probes openrouter instead of remaining stuck on index 1
     selector.resolve()
     assert selector.active_provider_id == "openrouter"
 
