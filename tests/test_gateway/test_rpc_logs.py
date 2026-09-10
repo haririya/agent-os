@@ -35,6 +35,78 @@ async def test_logs_tail_missing_file_returns_empty_payload(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_logs_tail_sanitizes_string_and_invalid_limit(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AGENTOS_LOG_DIR", str(tmp_path))
+    log_file = tmp_path / "debug.log"
+    log_file.write_text("line1\nline2\nline3\n", encoding="utf-8")
+
+    # Stringified int limit should parse properly without TypeError
+    result = await _handle_logs_tail({"limit": "2", "cursor": 0}, None)  # type: ignore[arg-type]
+    assert result["lines"] == ["line2", "line3"]
+    assert result["has_more"] is True
+
+    # Invalid limit should safely fall back to default (100) without crashing
+    for bad_limit in ("not_a_number", None, []):
+        result = await _handle_logs_tail({"limit": bad_limit, "cursor": 0}, None)  # type: ignore[arg-type]
+        assert result["lines"] == ["line1", "line2", "line3"]
+        assert result["has_more"] is False
+
+
+@pytest.mark.asyncio
+async def test_logs_tail_clamps_limit_bounds_and_prevents_unbounded_dump(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("AGENTOS_LOG_DIR", str(tmp_path))
+    log_file = tmp_path / "debug.log"
+    log_file.write_text("line1\nline2\nline3\n", encoding="utf-8")
+
+    # limit=0 must clamp to 1 and not evaluate as [-0:] (which would dump all lines)
+    result = await _handle_logs_tail({"limit": 0, "cursor": 0}, None)  # type: ignore[arg-type]
+    assert result["lines"] == ["line3"]
+    assert result["has_more"] is True
+
+    # Negative limit must clamp to 1
+    result = await _handle_logs_tail({"limit": -5, "cursor": 0}, None)  # type: ignore[arg-type]
+    assert result["lines"] == ["line3"]
+    assert result["has_more"] is True
+
+    # Oversized limit should cap at 1000
+    result = await _handle_logs_tail({"limit": 5000, "cursor": 0}, None)  # type: ignore[arg-type]
+    assert result["lines"] == ["line1", "line2", "line3"]
+    assert result["has_more"] is False
+
+
+@pytest.mark.asyncio
+async def test_logs_tail_sanitizes_cursor_and_prevents_negative_seek(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AGENTOS_LOG_DIR", str(tmp_path))
+    log_file = tmp_path / "debug.log"
+    log_file.write_text("hello world\n", encoding="utf-8")
+
+    # Stringified cursor should parse without TypeError
+    result = await _handle_logs_tail({"limit": 10, "cursor": "0"}, None)  # type: ignore[arg-type]
+    assert result["lines"] == ["hello world"]
+
+    # Negative cursor should clamp to 0 instead of raising ValueError: negative seek position
+    result = await _handle_logs_tail({"limit": 10, "cursor": -10}, None)  # type: ignore[arg-type]
+    assert result["lines"] == ["hello world"]
+
+    # Non-integer cursor should fall back to 0
+    result = await _handle_logs_tail({"limit": 10, "cursor": "invalid"}, None)  # type: ignore[arg-type]
+    assert result["lines"] == ["hello world"]
+
+
+@pytest.mark.asyncio
+async def test_logs_tail_handles_non_string_level_filter(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AGENTOS_LOG_DIR", str(tmp_path))
+    log_file = tmp_path / "debug.log"
+    log_file.write_text("line1\n", encoding="utf-8")
+
+    # Non-string level should not crash with AttributeError
+    result = await _handle_logs_tail({"limit": 10, "cursor": 0, "level": 123}, None)  # type: ignore[arg-type]
+    assert result["lines"] == []
+
+
+@pytest.mark.asyncio
 async def test_logs_status_reports_raw_capture_disabled_by_default(monkeypatch) -> None:
     monkeypatch.delenv("AGENTOS_TURN_CALL_LOG", raising=False)
     monkeypatch.delenv("AGENTOS_TURN_CALL_LOG_DIR", raising=False)
