@@ -446,6 +446,36 @@ def test_override_model_resets_stale_fallback_index_to_primary() -> None:
     assert selector.active_provider_id == "openrouter"
 
 
+def test_override_model_without_fallbacks_resets_stale_fallback_admission_on_long_chain() -> None:
+    """When a selector has advanced to a fallback and override_model updates the
+    model on a long chain without changing fallbacks (fallbacks=None), stale
+    fallback admission must be cleared so the primary model is evaluated
+    instead of silently serving the old fallback link."""
+    clock = FakeClock()
+    breaker = _breaker(clock, threshold=1, cooldown=60.0)
+    _fail(breaker, "openrouter", 1)
+
+    selector = _three_link_selector(breaker)
+    selector.resolve()
+    assert selector.active_provider_id == "deepseek"
+    assert selector._index == 1
+    assert selector._admitted_index == 1
+
+    # Cooldown expires: openrouter is now in HALF_OPEN state
+    clock.advance(60.0)
+
+    # Override primary model without altering the fallback chain (fallbacks=None)
+    selector.override_model("openai/gpt-5.4-mini")
+    assert selector._index == 0
+    assert selector._admitted_index is None
+
+    # Resolving evaluates the primary provider (openrouter) instead of silently
+    # returning the old fallback link (deepseek)
+    selector.resolve()
+    assert selector.active_provider_id == "openrouter"
+    assert selector._admitted_index == 0
+
+
 def test_a_different_turn_does_not_share_the_held_probe() -> None:
     clock = FakeClock()
     breaker = _breaker(clock, threshold=1, cooldown=60.0)
