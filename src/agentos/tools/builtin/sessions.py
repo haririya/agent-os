@@ -10,7 +10,11 @@ import structlog
 
 from agentos.agents.limits import MAX_SPAWN_DEPTH
 from agentos.gateway.routing import build_subagent_route_envelope
-from agentos.session.keys import build_subagent_session_key, parse_agent_id
+from agentos.session.keys import (
+    build_subagent_session_key,
+    canonicalize_session_key,
+    parse_agent_id,
+)
 from agentos.session.naming import normalize_session_name
 from agentos.tools.registry import tool
 from agentos.tools.types import SafeToolError, ToolError, current_tool_context
@@ -388,6 +392,7 @@ async def sessions_spawn(
 
         if not parent_session_key:
             raise ToolError("Cannot spawn subagent without a parent session")
+        parent_session_key = canonicalize_session_key(parent_session_key)
         if current_depth >= _MAX_SPAWN_DEPTH:
             raise ToolError(f"Max spawn depth ({_MAX_SPAWN_DEPTH}) exceeded")
 
@@ -658,7 +663,11 @@ async def sessions_yield(
         current = await mgr.get_current_session()
         if current is not None:
             current_key = getattr(current, "session_key", None)
-            if current_key == session_key:
+            if (
+                current_key
+                and session_key
+                and canonicalize_session_key(current_key) == canonicalize_session_key(session_key)
+            ):
                 raise ToolError("Cannot yield to own session")
     except ToolError:
         raise

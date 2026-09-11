@@ -662,6 +662,10 @@ class SessionStorage:
     async def upsert_session(self, node: SessionNode) -> None:
         node.session_key = canonicalize_session_key(node.session_key)
         node.agent_id = normalize_agent_id(node.agent_id)
+        if node.parent_session_key:
+            node.parent_session_key = canonicalize_session_key(node.parent_session_key)
+        if node.spawned_by:
+            node.spawned_by = canonicalize_session_key(node.spawned_by)
         data = node.model_dump()
         cols = list(data.keys())
         placeholders = ", ".join("?" for _ in cols)

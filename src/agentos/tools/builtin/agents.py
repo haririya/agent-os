@@ -7,6 +7,7 @@ from typing import Any
 
 import structlog
 
+from agentos.session.keys import canonicalize_session_key
 from agentos.tools.builtin.sessions import _get_session_manager, _get_task_runtime
 from agentos.tools.registry import tool
 from agentos.tools.types import ToolError, current_tool_context
@@ -56,7 +57,10 @@ def _spawned_by(session_or_dict: object) -> object:
 def _check_spawned_by_or_raise(session_or_dict: object, current_key: str | None) -> None:
     if current_key is None:
         raise ToolError("session context required")
-    if _spawned_by(session_or_dict) != current_key:
+    spawned_by = _spawned_by(session_or_dict)
+    if not spawned_by or canonicalize_session_key(str(spawned_by)) != canonicalize_session_key(
+        current_key
+    ):
         raise ToolError("Session was not spawned by this session")
 
 
@@ -126,11 +130,15 @@ async def subagents(
             if current_key is None:
                 log.warning("subagents.list_no_session_context")
                 return json.dumps({"action": "list", "subagents": []})
-            all_sessions = await mgr.list_sessions()
+            canonical_current = canonicalize_session_key(current_key)
+            try:
+                all_sessions = await mgr.list_sessions(spawned_by=canonical_current)
+            except TypeError:
+                all_sessions = await mgr.list_sessions()
             subs = [
                 s
                 for s in all_sessions
-                if isinstance(s, dict) and s.get("spawned_by") == current_key
+                if canonicalize_session_key(str(_spawned_by(s))) == canonical_current
             ]
             return json.dumps({"action": "list", "subagents": subs})
         except (ImportError, AttributeError, NotImplementedError) as exc:

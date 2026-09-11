@@ -258,6 +258,12 @@ class SessionManager:
             raise ValueError(f"Session already exists: {session_key}")
         if kwargs.get("project_id"):
             await self._require_project(str(kwargs["project_id"]))
+        if kwargs.get("spawned_by"):
+            kwargs["spawned_by"] = canonicalize_session_key(str(kwargs["spawned_by"]))
+        if kwargs.get("parent_session_key"):
+            kwargs["parent_session_key"] = canonicalize_session_key(
+                str(kwargs["parent_session_key"])
+            )
 
         now = _now_ms()
         node = SessionNode(
