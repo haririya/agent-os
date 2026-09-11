@@ -33,6 +33,7 @@ class SourceRouter:
         self, query: str, limit: int = 20, source_id: str | None = None
     ) -> list[SkillMeta]:
         """Search across all sources (or a specific one). Returns merged results."""
+        limit = max(1, limit)
         if source_id:
             src = self._sources.get(source_id)
             if src is None:
