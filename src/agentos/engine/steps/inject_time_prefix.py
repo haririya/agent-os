@@ -11,7 +11,7 @@ from datetime import datetime
 TIME_PREFIX_RE = re.compile(
     r"^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}[+\-]\d{2}:\d{2} "
     r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) "
-    r"[A-Za-z0-9_+\-/]+\]\n"
+    r"[^\]\r\n]+\](?:\r?\n|$)"
 )
 
 
