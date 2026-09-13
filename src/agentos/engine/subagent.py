@@ -79,11 +79,12 @@ class SubagentRegistry:
     def abort(self, run_id: str) -> bool:
         """Cancel a running subagent's asyncio.Task and mark it aborted."""
         handle = self._runs.get(run_id)
-        if handle is None:
+        if handle is None or handle.status != "running":
             return False
         handle.task.cancel()
         handle.status = "aborted"
         handle.completed_at = time.monotonic()
+        self._parent_tasks.pop(run_id, None)
         return True
 
     def archive(self, run_id: str) -> bool:
@@ -111,11 +112,14 @@ class SubagentRegistry:
         """Abort handles whose parent task is done. Returns list of aborted run_ids."""
         aborted: list[str] = []
         for run_id, parent_task in list(self._parent_tasks.items()):
+            handle = self._runs.get(run_id)
             if parent_task.done():
-                handle = self._runs.get(run_id)
+                self._parent_tasks.pop(run_id, None)
                 if handle and handle.status == "running":
                     self.abort(run_id)
                     aborted.append(run_id)
+            elif handle and handle.status != "running":
+                self._parent_tasks.pop(run_id, None)
         return aborted
 
     def save_state(self, path: Path) -> None:
@@ -133,23 +137,36 @@ class SubagentRegistry:
                     "completed_at": h.completed_at,
                 }
             )
-        path.write_text(json.dumps(entries, indent=2))
+        path.write_text(json.dumps(entries, indent=2), encoding="utf-8")
 
     def load_state(self, path: Path) -> dict[str, SubagentHandle]:
         """Restore registry from JSON. All loaded handles are marked 'orphaned'."""
         if not path.exists():
             return {}
 
-        entries = json.loads(path.read_text())
+        entries = json.loads(path.read_text(encoding="utf-8"))
         loaded: dict[str, SubagentHandle] = {}
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
 
         for entry in entries:
             # Create a dummy completed task as placeholder
             async def _noop() -> str:
                 return ""
 
-            task: asyncio.Task[str] = asyncio.create_task(_noop())
-            task.cancel()
+            if loop is not None:
+                task: asyncio.Task[str] = loop.create_task(_noop())
+                task.cancel()
+            else:
+                temp_loop = asyncio.new_event_loop()
+                try:
+                    task = temp_loop.create_task(_noop())
+                    temp_loop.run_until_complete(task)
+                finally:
+                    temp_loop.close()
 
             handle = SubagentHandle(
                 run_id=entry["run_id"],
@@ -233,10 +250,12 @@ class SubagentManager:
         task: asyncio.Task[str] = asyncio.create_task(
             _run_with_timeout(), name=f"subagent-{run_id}"
         )
+        parent_task = asyncio.current_task()
         handle = SubagentHandle(
             run_id=run_id,
             label=spec.label or spec.task[:40],
             task=task,
+            parent_task_id=id(parent_task) if parent_task is not None else None,
             spawned_at=time.monotonic(),
         )
 
@@ -254,7 +273,7 @@ class SubagentManager:
                 handle.result = t.result()
 
         task.add_done_callback(_on_done)
-        self.registry.register(handle)
+        self.registry.register(handle, parent_task=parent_task)
         return handle
 
     async def wait_all(self, timeout: float | None = None) -> None:
