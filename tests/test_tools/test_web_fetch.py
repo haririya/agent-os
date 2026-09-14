@@ -1,12 +1,34 @@
 from __future__ import annotations
 
+import json
+from typing import Any
+
+import httpx
+import pytest
+
 from agentos.result_budget import ToolResultBudgetPolicy, ToolRunBudgetPolicy
+from agentos.sandbox.config import SandboxSettings
+from agentos.sandbox.integration import configure_runtime, reset_runtime
 from agentos.tools.builtin.web_fetch import (
     _apply_max_chars,
     _resolve_effective_max_chars,
+    _try_firecrawl,
     _wrap_content,
+    web_fetch,
 )
 from agentos.tools.types import ToolContext, current_tool_context
+
+
+@pytest.fixture
+def sandbox_off(tmp_path: Any) -> Any:
+    from pathlib import Path
+
+    configure_runtime(
+        SandboxSettings(sandbox=False, security_grading=False, allow_legacy_mode=True),
+        workspace=Path(tmp_path),
+    )
+    yield
+    reset_runtime()
 
 
 def test_wrap_content_emits_untrusted_envelope_with_escaped_boundaries() -> None:
@@ -111,3 +133,88 @@ def test_resolve_effective_max_chars_run_budget_cap_still_applies_below_minimum(
         assert _resolve_effective_max_chars(999) == 50
     finally:
         current_tool_context.reset(token)
+
+
+def _e2e_resolver(addr: str) -> Any:
+    def resolver(host: Any, port: Any, **_kw: Any) -> list[tuple[Any, ...]]:
+        return [(2, 1, 6, "", (addr, 0))]
+
+    return resolver
+
+
+def _install_transport(monkeypatch: pytest.MonkeyPatch, handler: Any) -> None:
+    real_async_client = httpx.AsyncClient
+
+    def fake_async_client(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        kwargs.pop("transport", None)
+        return real_async_client(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr("socket.getaddrinfo", _e2e_resolver("93.184.216.34"))
+    monkeypatch.setattr("agentos.tools.builtin.web_fetch.httpx.AsyncClient", fake_async_client)
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_firecrawl_escalation_when_readability_returns_none(
+    sandbox_off: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "test-key")
+    monkeypatch.setattr("agentos.tools.builtin.web_fetch._try_readability", lambda html: None)
+
+    async def mock_try_firecrawl(url: str, api_key: str) -> tuple[str, str, str] | None:
+        return "Firecrawl Scraped Title", "# Firecrawl Content", "firecrawl"
+
+    monkeypatch.setattr("agentos.tools.builtin.web_fetch._try_firecrawl", mock_try_firecrawl)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text="<html><body>js app</body></html>",
+            headers={"content-type": "text/html"},
+        )
+
+    _install_transport(monkeypatch, handler)
+
+    raw_result = await web_fetch("https://example.com/app", extract_mode="markdown")
+    result = json.loads(raw_result)
+
+    assert result["status"] == 200
+    assert result["extractor"] == "firecrawl"
+    assert result["title"] == "Firecrawl Scraped Title"
+    assert "Firecrawl Content" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_try_firecrawl_parses_metadata_title(monkeypatch: pytest.MonkeyPatch) -> None:
+    class MockResponse:
+        status_code = 200
+
+        def json(self) -> dict[str, Any]:
+            return {
+                "success": True,
+                "data": {
+                    "markdown": "## Hello",
+                    "metadata": {
+                        "title": "Document Title",
+                        "description": "Some description",
+                    },
+                },
+            }
+
+    class MockAsyncClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> MockAsyncClient:
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            pass
+
+        async def post(self, url: str, **kwargs: Any) -> MockResponse:
+            return MockResponse()
+
+    monkeypatch.setattr("agentos.tools.builtin.web_fetch.httpx.AsyncClient", MockAsyncClient)
+
+    res = await _try_firecrawl("https://example.com", "fake-key")
+    assert res == ("Document Title", "## Hello", "firecrawl")

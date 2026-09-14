@@ -96,8 +96,8 @@ def _markdown_to_text(markdown: str) -> str:
     return h.handle(markdown)
 
 
-async def _try_firecrawl(url: str, api_key: str) -> tuple[str, str] | None:
-    """Try Firecrawl API. Returns (content, extractor) or None."""
+async def _try_firecrawl(url: str, api_key: str) -> tuple[str, str, str] | None:
+    """Try Firecrawl API. Returns (title, content, extractor) or None."""
     try:
         async with httpx.AsyncClient(timeout=30.0, trust_env=_trust_env()) as client:
             resp = await client.post(
@@ -107,7 +107,13 @@ async def _try_firecrawl(url: str, api_key: str) -> tuple[str, str] | None:
             )
             data = resp.json()
             if data.get("success"):
-                return data["data"]["markdown"], "firecrawl"
+                scrape_data = data.get("data", {})
+                markdown = scrape_data.get("markdown", "") if isinstance(scrape_data, dict) else ""
+                metadata = scrape_data.get("metadata", {}) if isinstance(scrape_data, dict) else {}
+                title = metadata.get("title", "") if isinstance(metadata, dict) else ""
+                if not isinstance(title, str):
+                    title = ""
+                return title, markdown, "firecrawl"
             log.warning("web_fetch.firecrawl_unsuccessful", url=url, response=data)
     except Exception as exc:
         log.warning("web_fetch.firecrawl_error", url=url, error=str(exc))
@@ -400,6 +406,7 @@ async def web_fetch(
     # Try local extractors first (zero-cost, handles ~90% of mainstream pages),
     # escalate to Firecrawl only when readability misses (JS-heavy / anti-bot
     # sites), and fall back to html2text for everything else.
+    title = ""
     extracted_content = ""
     extractor_used = "html2text"
 
@@ -421,7 +428,9 @@ async def web_fetch(
         )
         fc_result = await _try_firecrawl(url, firecrawl_key)
         if fc_result is not None:
-            extracted_content, extractor_used = fc_result
+            fc_title, extracted_content, extractor_used = fc_result
+            if fc_title or not title:
+                title = fc_title
 
     # 3. html2text fallback — always succeeds on valid HTML
     if not extracted_content:
