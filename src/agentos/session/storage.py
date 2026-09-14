@@ -32,9 +32,7 @@ def _serialized_write[**P, R](
     """Hold transaction ownership for a complete mutating storage call."""
 
     @wraps(method)
-    async def wrapped(
-        self: SessionStorage, /, *args: P.args, **kwargs: P.kwargs
-    ) -> R:
+    async def wrapped(self: SessionStorage, /, *args: P.args, **kwargs: P.kwargs) -> R:
         async with self._write_lock:
             try:
                 return await method(self, *args, **kwargs)
@@ -132,15 +130,12 @@ CREATE TABLE IF NOT EXISTS projects (
 )
 """
 
-_CREATE_IDX_PROJECTS_AGENT = (
-    "CREATE INDEX IF NOT EXISTS idx_projects_agent ON projects(agent_id)"
-)
+_CREATE_IDX_PROJECTS_AGENT = "CREATE INDEX IF NOT EXISTS idx_projects_agent ON projects(agent_id)"
 
 # Backstop for the advisory Python-side name check (closes the concurrent
 # create race). NOCASE folds ASCII only; the casefold check stays primary.
 _CREATE_UNIQUE_IDX_PROJECTS_NAME = (
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name_nocase "
-    "ON projects(name COLLATE NOCASE)"
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name_nocase ON projects(name COLLATE NOCASE)"
 )
 
 _CREATE_IDX_SESSIONS_PROJECT = (
@@ -517,15 +512,11 @@ class SessionStorage:
             )
             await self._conn.commit()
         # Defensive: zero-out any NULL epoch rows left by a partial migration.
-        async with self._conn.execute(
-            "SELECT COUNT(*) FROM sessions WHERE epoch IS NULL"
-        ) as cur:
+        async with self._conn.execute("SELECT COUNT(*) FROM sessions WHERE epoch IS NULL") as cur:
             row = await cur.fetchone()
         null_count = row[0] if row else 0
         if null_count > 0:
-            await self._conn.execute(
-                "UPDATE sessions SET epoch = 0 WHERE epoch IS NULL"
-            )
+            await self._conn.execute("UPDATE sessions SET epoch = 0 WHERE epoch IS NULL")
             await self._conn.commit()
 
     async def _migrate_transcript_reasoning_content_column(self) -> None:
@@ -545,9 +536,7 @@ class SessionStorage:
         async with self._conn.execute("PRAGMA table_info(transcript_entries)") as cur:
             columns = [row[1] for row in await cur.fetchall()]
         if "turn_usage" not in columns:
-            await self._conn.execute(
-                "ALTER TABLE transcript_entries ADD COLUMN turn_usage TEXT"
-            )
+            await self._conn.execute("ALTER TABLE transcript_entries ADD COLUMN turn_usage TEXT")
             await self._conn.commit()
 
     async def _migrate_summary_metadata_columns(self) -> None:
@@ -580,8 +569,7 @@ class SessionStorage:
             "tokens_before": "ALTER TABLE session_summaries ADD COLUMN tokens_before INTEGER",
             "tokens_after": "ALTER TABLE session_summaries ADD COLUMN tokens_after INTEGER",
             "removed_count": (
-                "ALTER TABLE session_summaries ADD COLUMN "
-                "removed_count INTEGER NOT NULL DEFAULT 0"
+                "ALTER TABLE session_summaries ADD COLUMN removed_count INTEGER NOT NULL DEFAULT 0"
             ),
             "kept_count": (
                 "ALTER TABLE session_summaries ADD COLUMN kept_count INTEGER NOT NULL DEFAULT 0"
@@ -611,9 +599,7 @@ class SessionStorage:
             "coverage_turn_id": (
                 "ALTER TABLE memory_durable_receipts ADD COLUMN coverage_turn_id TEXT"
             ),
-            "coverage_hash": (
-                "ALTER TABLE memory_durable_receipts ADD COLUMN coverage_hash TEXT"
-            ),
+            "coverage_hash": ("ALTER TABLE memory_durable_receipts ADD COLUMN coverage_hash TEXT"),
             "coverage_entry_count": (
                 "ALTER TABLE memory_durable_receipts ADD COLUMN coverage_entry_count INTEGER"
             ),
@@ -918,9 +904,7 @@ class SessionStorage:
                 "UPDATE sessions SET project_id = NULL WHERE project_id = ?",
                 (project_id,),
             )
-            await self.conn.execute(
-                "DELETE FROM projects WHERE project_id = ?", (project_id,)
-            )
+            await self.conn.execute("DELETE FROM projects WHERE project_id = ?", (project_id,))
             await self.conn.commit()
         except Exception:
             await self.conn.rollback()
@@ -1000,6 +984,7 @@ class SessionStorage:
         status: str | AgentTaskStatus | None = None,
         limit: int = 100,
         offset: int = 0,
+        order_desc: bool = False,
     ) -> list[AgentTaskRecord]:
         clauses: list[str] = []
         params: list[Any] = []
@@ -1011,9 +996,10 @@ class SessionStorage:
             params.append(str(status))
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params += [limit, offset]
+        order = "DESC" if order_desc else "ASC"
         sql = (
             f"SELECT * FROM agent_tasks {where} "
-            "ORDER BY created_at ASC, rowid ASC LIMIT ? OFFSET ?"
+            f"ORDER BY created_at {order}, rowid {order} LIMIT ? OFFSET ?"
         )
         async with self.conn.execute(sql, params) as cur:
             rows = await cur.fetchall()
@@ -1112,9 +1098,7 @@ class SessionStorage:
         allowed = set(MemoryDurableReceipt.model_fields) - {"receipt_id", "created_at"}
         unknown = sorted(set(fields) - allowed)
         if unknown:
-            raise ValueError(
-                f"Unknown memory durable receipt fields: {', '.join(unknown)}"
-            )
+            raise ValueError(f"Unknown memory durable receipt fields: {', '.join(unknown)}")
         if "session_key" in fields:
             fields["session_key"] = canonicalize_session_key(fields["session_key"])
         fields.setdefault("updated_at", _now_ms())
@@ -1229,7 +1213,7 @@ class SessionStorage:
                 raise StaleEpochError(
                     f"Epoch mismatch for {entry.session_key}: "
                     f"expected {expected_epoch}, got {actual}"
-            )
+                )
             await self.conn.commit()
         else:
             sql = f"INSERT INTO transcript_entries ({', '.join(cols)}) VALUES ({placeholders})"
@@ -1306,9 +1290,7 @@ class SessionStorage:
             ORDER BY created_at ASC, id ASC
             LIMIT ? OFFSET ?
         """
-        async with self.conn.execute(
-            sql, (session_id, session_id, limit_val, offset)
-        ) as cur:
+        async with self.conn.execute(sql, (session_id, session_id, limit_val, offset)) as cur:
             rows = await cur.fetchall()
         return [TranscriptEntry(**_deserialize_row(dict(r))) for r in rows]
 
@@ -1383,9 +1365,7 @@ class SessionStorage:
             row = await cur.fetchone()
         return row[0] if row else 0
 
-    async def count_transcript_entries_batch(
-        self, session_ids: list[str]
-    ) -> dict[str, int]:
+    async def count_transcript_entries_batch(self, session_ids: list[str]) -> dict[str, int]:
         """Count transcript entries for many sessions in one round trip.
 
         Used by ``sessions.list`` (rpc_sessions.py) to avoid the N+1 pattern
@@ -1548,9 +1528,7 @@ class SessionStorage:
                 node=node,
                 entries=archived_entries or [],
                 compaction_id=summary.compaction_id if summary is not None else None,
-                compaction_index=summary.compaction_index
-                if summary is not None
-                else None,
+                compaction_index=summary.compaction_index if summary is not None else None,
             )
 
             await self.conn.execute(
@@ -1727,9 +1705,7 @@ class SessionStorage:
     # ── SessionContextState CRUD ─────────────────────────────────────────────
 
     @_serialized_write
-    async def save_context_state(
-        self, state: SessionContextState
-    ) -> SessionContextState:
+    async def save_context_state(self, state: SessionContextState) -> SessionContextState:
         """Persist portable or provider-native context state for later replay."""
         state.session_key = canonicalize_session_key(state.session_key)
         data = state.model_dump(exclude={"id"})
@@ -1737,8 +1713,7 @@ class SessionStorage:
         placeholders = ", ".join("?" for _ in cols)
         values = [_serialize(data[c]) for c in cols]
         async with self.conn.execute(
-            "INSERT INTO session_context_states "
-            f"({', '.join(cols)}) VALUES ({placeholders})",
+            f"INSERT INTO session_context_states ({', '.join(cols)}) VALUES ({placeholders})",
             values,
         ) as cur:
             state.id = cur.lastrowid
@@ -1766,8 +1741,7 @@ class SessionStorage:
             clauses.append("valid = 1")
         where = " AND ".join(clauses)
         async with self.conn.execute(
-            "SELECT * FROM session_context_states "
-            f"WHERE {where} ORDER BY created_at ASC, id ASC",
+            f"SELECT * FROM session_context_states WHERE {where} ORDER BY created_at ASC, id ASC",
             params,
         ) as cur:
             rows = await cur.fetchall()

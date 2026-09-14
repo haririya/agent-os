@@ -520,10 +520,14 @@ class TaskRuntime:
     ) -> list[AgentTaskRecord]:
         if session_key is not None:
             session_key = canonicalize_session_key(session_key)
-        return cast(
+        rows = cast(
             list[AgentTaskRecord],
-            await self._storage.list_agent_tasks(session_key=session_key, status=status),
+            await self._storage.list_agent_tasks(
+                session_key=session_key, status=status, order_desc=True
+            ),
         )
+        rows.reverse()
+        return rows
 
     async def cancel(
         self,
