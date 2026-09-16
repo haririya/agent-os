@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `pdf-toolkit`: `merge.py` resolved relative file paths inside a `manifest.json`
+  against the current working directory instead of the manifest's parent
+  directory, causing merges run from outside the manifest directory to fail
+  with missing file warnings.
+
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed

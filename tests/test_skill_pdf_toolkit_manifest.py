@@ -251,3 +251,39 @@ def test_a_failed_merge_does_not_create_the_output_directory(tmp_path: Path) -> 
 
     assert result.pages_written == 0
     assert not out.parent.exists()
+
+
+# ── relative paths in manifest resolved against manifest directory ─────────
+
+
+def test_manifest_relative_paths_resolve_against_manifest_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """Relative paths in manifest.json must resolve against the manifest file's
+    parent directory, not the current working directory."""
+    doc_dir = tmp_path / "documents"
+    doc_dir.mkdir()
+    a = doc_dir / "a.pdf"
+    b = doc_dir / "b.pdf"
+    _make_pdf(a, 2, "ALPHA")
+    _make_pdf(b, 3, "BRAVO")
+
+    manifest = doc_dir / "manifest.json"
+    manifest.write_text(
+        json.dumps([{"file": "a.pdf", "pages": "1"}, {"file": "b.pdf", "pages": "2-3"}]),
+        encoding="utf-8",
+    )
+
+    work_dir = tmp_path / "other_work_dir"
+    work_dir.mkdir()
+    monkeypatch.chdir(work_dir)
+
+    out = tmp_path / "out.pdf"
+    code = _run([str(manifest), "--out", str(out)], monkeypatch)
+
+    assert code == 0
+    captured = capsys.readouterr()
+    summary = json.loads(captured.out)
+    assert summary["pages_written"] == 3
+    assert summary["missing_files"] == []
+    assert out.is_file()

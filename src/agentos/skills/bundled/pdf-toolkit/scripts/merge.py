@@ -106,9 +106,12 @@ class MergeResult:
     missing_files: list[str] = field(default_factory=list)
 
 
-def merge(items: Iterable[dict[str, str]], out: Path) -> MergeResult:
+def merge(
+    items: Iterable[dict[str, str]], out: Path, *, base_dir: Path | None = None
+) -> MergeResult:
     """Merge *items* into *out*, reporting what did not make it in.
 
+    When *base_dir* is provided, relative input paths are resolved against it.
     The output file is written only when at least one page went into it. A
     zero-page PDF is not a merge that succeeded with nothing to do -- it is a
     merge whose every input was missing or out of range, and leaving a valid
@@ -125,16 +128,19 @@ def merge(items: Iterable[dict[str, str]], out: Path) -> MergeResult:
         if not isinstance(item, dict) or not isinstance(item.get("file"), str):
             print(f"warn: skipping unusable manifest entry {item!r}", file=sys.stderr)
             continue
-        path = Path(item["file"])
-        if not path.is_file():
-            print(f"warn: missing {path}", file=sys.stderr)
-            result.missing_files.append(str(path))
+        raw_path = Path(item["file"])
+        resolved_path = (
+            base_dir / raw_path if base_dir is not None and not raw_path.is_absolute() else raw_path
+        )
+        if not resolved_path.is_file():
+            print(f"warn: missing {raw_path}", file=sys.stderr)
+            result.missing_files.append(str(raw_path))
             continue
-        reader = PdfReader(str(path))
+        reader = PdfReader(str(resolved_path))
         total = len(reader.pages)
         skipped = [p for p in requested_pages(item.get("pages"), total) if not 1 <= p <= total]
         if skipped:
-            result.skipped.append((str(path), skipped))
+            result.skipped.append((str(raw_path), skipped))
         for page_num in parse_ranges(item.get("pages"), total):
             writer.add_page(reader.pages[page_num - 1])
             result.pages_written += 1
@@ -160,6 +166,7 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     items: list[dict[str, str]]
+    base_dir: Path | None = None
     if len(args.inputs) == 1 and args.inputs[0].endswith(".json"):
         manifest_path = Path(args.inputs[0])
         if not manifest_path.is_file():
@@ -167,12 +174,13 @@ def main() -> int:
             return 2
         try:
             items = load_manifest(manifest_path)
+            base_dir = manifest_path.resolve().parent
         except ManifestError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
     else:
         items = [{"file": p} for p in args.inputs]
-    result = merge(items, args.out)
+    result = merge(items, args.out, base_dir=base_dir)
     if result.pages_written == 0:
         print(
             f"error: no requested page exists in any input; nothing written to {args.out}",
