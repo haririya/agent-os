@@ -548,3 +548,77 @@ def test_apply_ops_counts_only_the_replace_runs_that_wrote() -> None:
 
     assert applied == 2
     assert [p.text for p in doc.paragraphs] == ["Hi world", "Last paragraph"]
+
+
+def test_inspect_docx_stdout_survives_non_utf8_encoding_cp1252(tmp_path: Path) -> None:
+    """Inspect stdout must not raise UnicodeEncodeError on a cp1252 code page."""
+    import os
+    import subprocess
+
+    from agentos.skills.bundled.docx.scripts.create_docx import build
+
+    doc_path = tmp_path / "cjk_doc.docx"
+    doc = build({"body": [{"kind": "paragraph", "text": "東京都 Summary"}]})
+    doc.save(str(doc_path))
+
+    script = SCRIPTS / "inspect_docx.py"
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
+    proc = subprocess.run(
+        [sys.executable, str(script), str(doc_path)],
+        capture_output=True,
+        env=env,
+    )
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    assert "東京都".encode() in proc.stdout
+    payload = json.loads(proc.stdout.decode("utf-8"))
+    assert payload["paragraphs"][0]["text"] == "東京都 Summary"
+
+
+def test_inspect_docx_stdout_survives_non_utf8_encoding_cp936_emoji(tmp_path: Path) -> None:
+    """Inspect stdout must not raise UnicodeEncodeError on cp936 when paragraphs have emoji."""
+    import os
+    import subprocess
+
+    from agentos.skills.bundled.docx.scripts.create_docx import build
+
+    doc_path = tmp_path / "emoji_doc.docx"
+    doc = build({"body": [{"kind": "paragraph", "text": "季度回顾 🎉"}]})
+    doc.save(str(doc_path))
+
+    script = SCRIPTS / "inspect_docx.py"
+    env = {**os.environ, "PYTHONIOENCODING": "cp936"}
+    proc = subprocess.run(
+        [sys.executable, str(script), str(doc_path)],
+        capture_output=True,
+        env=env,
+    )
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    assert "季度回顾 🎉".encode() in proc.stdout
+    payload = json.loads(proc.stdout.decode("utf-8"))
+    assert payload["paragraphs"][0]["text"] == "季度回顾 🎉"
+
+
+def test_inspect_docx_write_falls_back_when_stdout_has_no_buffer() -> None:
+    """_write must fall back gracefully to text layer with backslashreplace."""
+    import io
+
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import inspect_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    class NoBufferStream(io.StringIO):
+        encoding = "cp936"
+
+    stream = NoBufferStream()
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(sys, "stdout", stream)
+    try:
+        inspect_docx._write("季度回顾 🎉\n")
+    finally:
+        monkeypatch.undo()
+
+    written = stream.getvalue()
+    assert "季度回顾" in written
+    assert "?" not in written
