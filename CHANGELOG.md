@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `musebook`: keep bundled `muse.py` output resilient on non-UTF-8 console
+  code pages (Windows cp437 / cp1252) by writing UTF-8 bytes to the stream buffer
+  with fallback, and normalize `--path` to prevent duplicate `/api/` prefixes.
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added

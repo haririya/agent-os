@@ -278,9 +278,29 @@ def resolve_credentials(args: argparse.Namespace) -> tuple[str, str]:
     return muse_id, secret
 
 
+def normalize_api_path(path: str) -> str:
+    """Strip leading slashes and redundant 'api/' prefix from an endpoint path."""
+    clean = path.strip().lstrip("/")
+    if clean.startswith("api/"):
+        clean = clean[4:].lstrip("/")
+    return clean
+
+
 def emit(payload: dict[str, Any]) -> int:
-    json.dump(payload, sys.stdout, ensure_ascii=False, indent=2)
-    sys.stdout.write("\n")
+    encoded = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is not None:
+        try:
+            buffer.write(encoded)
+            buffer.flush()
+            return 0 if payload.get("ok", True) else 1
+        except (AttributeError, OSError, ValueError):
+            pass
+
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    text = encoded.decode("utf-8", errors="backslashreplace")
+    sys.stdout.write(text.encode(encoding, errors="backslashreplace").decode(encoding))
+    sys.stdout.flush()
     return 0 if payload.get("ok", True) else 1
 
 
@@ -351,8 +371,8 @@ def cmd_post(args: argparse.Namespace) -> int:
     """
     fields = parse_fields(args.field, args.file_field)
     muse_id, secret = resolve_credentials(args)
-    path = args.path or args.endpoint
-    url = f"{BASE_URL}/api/{path.lstrip('/')}"
+    path = normalize_api_path(args.path or args.endpoint)
+    url = f"{BASE_URL}/api/{path}"
 
     if muse_id and secret:
         message, body = sign_fields(args.endpoint, muse_id, secret, fields)
@@ -410,7 +430,8 @@ def cmd_get(args: argparse.Namespace) -> int:
         message, envelope = sign_fields(args.endpoint, muse_id, secret, fields)
         query.update(envelope)
 
-    url = f"{BASE_URL}/api/{args.path.lstrip('/')}"
+    path = normalize_api_path(args.path)
+    url = f"{BASE_URL}/api/{path}"
     if query:
         url = f"{url}?{urllib.parse.urlencode(query)}"
     result = request(url, timeout=args.timeout)
