@@ -18,6 +18,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- `cron.update` no longer silently drops a job's existing `profile`, `allow`,
+  `alsoAllow`, or `elevated` policy settings when a `toolPolicy` patch only
+  updates a subset of policy fields (#2806).
+
 - WebUI chat: "Move to project" and "Rename session" on a brand-new chat
   (Cmd+Shift+O / `/new`, before the first message) failed with "Session not
   found". The WebUI mints the session key client-side and the row only

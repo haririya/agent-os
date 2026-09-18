@@ -1076,7 +1076,13 @@ async def _handle_cron_update(params: dict | None, ctx: RpcContext) -> dict[str,
             )
 
     if "toolPolicy" in params or "tool_policy" in params:
-        patch["tool_policy"] = _tool_policy_from_params(params)
+        # Patching one field of the policy (e.g. adding a denial) must not
+        # silently drop the job's existing profile/allow/alsoAllow — merge the
+        # submitted keys onto the stored policy, same as the elevated-only
+        # branch below.
+        merged = dict(current_job.tool_policy or {})
+        merged.update(_tool_policy_from_params(params))
+        patch["tool_policy"] = merged
     elif "elevated" in params:
         # Toggling elevation alone must not drop the allow/deny lists already on
         # the job — merge into the stored policy instead of replacing it.
