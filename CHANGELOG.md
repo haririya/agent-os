@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Built-in `apply_patch` now strips common leading whitespace across non-blank
+  lines in the patch body so that indented patch blocks (e.g. from markdown
+  lists, blockquotes, or indented code blocks) parse section directives and diff
+  prefixes properly rather than silently dropping all operations and reporting
+  "no changes" ([#2799](https://github.com/use-agent-os/agent-os/issues/2799)).
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added

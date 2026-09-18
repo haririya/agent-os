@@ -161,3 +161,59 @@ def test_a_missing_begin_marker_is_still_reported() -> None:
     """Passes either way by design -- guards the branch the fix reordered."""
     with pytest.raises(ValueError, match=r"Missing '\*\*\* Begin Patch' marker"):
         patch_tool._parse_patch("*** Add File: sample.txt\n+hello\n*** End Patch\n")
+
+
+@pytest.mark.asyncio
+async def test_uniformly_indented_patch_block_applies(tmp_path: Path) -> None:
+    """An indented patch block (e.g. within a markdown list or blockquote) must apply.
+
+    When the entire patch block carries leading whitespace, the parser strips
+    the common indentation so directive markers and diff prefixes match rather
+    than being silently skipped as unrecognized directives.
+    """
+    patch_text = (
+        "    *** Begin Patch\n    *** Add File: sample.txt\n    +hello world\n    *** End Patch\n"
+    )
+    result = await _apply(tmp_path, patch_text)
+
+    assert "1 file(s) added" in result
+    assert (tmp_path / "sample.txt").read_text(encoding="utf-8") == "hello world"
+
+
+@pytest.mark.asyncio
+async def test_indented_update_hunk_preserves_diff_prefixes_and_code_indent(
+    tmp_path: Path,
+) -> None:
+    """Indented hunks keep context prefixes and inner code indentation exact."""
+    target = tmp_path / "app.py"
+    target.write_text("def run():\n    old_val = 1\n    return old_val\n", encoding="utf-8")
+
+    patch_text = (
+        "  *** Begin Patch\n"
+        "  *** Update File: app.py\n"
+        "  @@@ -1,3 +1,3 @@@\n"
+        "   def run():\n"
+        "  -    old_val = 1\n"
+        "  +    new_val = 2\n"
+        "       return old_val\n"
+        "  *** End Patch\n"
+    )
+    result = await _apply(tmp_path, patch_text)
+
+    assert "1 file(s) modified" in result
+    assert target.read_text(encoding="utf-8") == (
+        "def run():\n    new_val = 2\n    return old_val\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_indented_delete_file_applies(tmp_path: Path) -> None:
+    """Indented '*** Delete File:' blocks must delete the target file."""
+    target = tmp_path / "remove.txt"
+    target.write_text("obsolete content", encoding="utf-8")
+
+    patch_text = "    *** Begin Patch\n    *** Delete File: remove.txt\n    *** End Patch\n"
+    result = await _apply(tmp_path, patch_text)
+
+    assert "1 file(s) deleted" in result
+    assert not target.exists()

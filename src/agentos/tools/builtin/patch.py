@@ -67,6 +67,20 @@ def _leading_ws(line: str) -> str:
     return line[: len(line) - len(line.lstrip())]
 
 
+def _common_indent(lines: list[str]) -> str:
+    """Return the longest common whitespace prefix shared by non-blank lines."""
+    ws = [_leading_ws(line) for line in lines if line.strip()]
+    if not ws:
+        return ""
+    prefix = ws[0]
+    for w in ws[1:]:
+        while not w.startswith(prefix):
+            prefix = prefix[:-1]
+            if not prefix:
+                return ""
+    return prefix
+
+
 def _marker_span(lines: list[str]) -> tuple[int, int]:
     """Indices of the ``*** Begin Patch`` / ``*** End Patch`` lines that delimit the body.
 
@@ -116,6 +130,16 @@ def _parse_patch(patch_text: str) -> list[PatchOp]:
     # Trim to content between markers
     start_idx, end_idx = _marker_span(lines)
     body = lines[start_idx + 1 : end_idx]
+    # A patch block indented inside markdown lists, blockquotes, or indented
+    # code blocks carries leading whitespace on every line. Stripping the common
+    # indentation aligns directive headers (*** Add/Update/Delete File) and diff
+    # prefixes (+/-/" ") without altering inner code indentation.
+    common_indent = _common_indent(body)
+    if common_indent:
+        body = [
+            line[len(common_indent) :] if line.startswith(common_indent) else line.lstrip()
+            for line in body
+        ]
 
     ops: list[PatchOp] = []
     i = 0
